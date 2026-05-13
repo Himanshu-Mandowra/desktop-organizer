@@ -26,7 +26,7 @@ A customizable desktop wallpaper organizer and workspace layout editor built wit
 ```bash
 git clone <repo-url>
 
-cd deskcanvas
+cd <file>
 
 npm install
 
