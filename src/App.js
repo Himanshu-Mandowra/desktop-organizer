@@ -2,7 +2,7 @@ import CanvasBoard from "./components/CanvasBoard";
 
 function App() {
   return (
-    <div className="w-screen h-screen  bg-black">
+    <div className="h-screen w-screen overflow-hidden bg-[#09090b]">
       <CanvasBoard />
     </div>
   );
