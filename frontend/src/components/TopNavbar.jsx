@@ -13,6 +13,7 @@ import Undo2 from "lucide-react/dist/esm/icons/undo-2";
 import Redo2 from "lucide-react/dist/esm/icons/redo-2";
 
 function TopNavbar({
+  onGoHome,
   isLeftOpen,
   setIsLeftOpen,
   isRightOpen,
@@ -55,12 +56,20 @@ function TopNavbar({
           <PanelLeft size={16} />
         </button>
 
-        <div className="flex items-center gap-2">
-          <div className="h-3 w-3 rounded-sm bg-indigo-600" />
+        <button
+          onClick={onGoHome}
+          title="Back to Landing Page"
+          className="flex items-center gap-2 rounded-md px-1.5 py-1 transition hover:bg-[#18181b]"
+        >
+          <img
+            src="/logo.png"
+            alt="Desktop Canvas Logo"
+            className="h-8 w-8 object-contain"
+          />
           <span className="text-sm font-bold tracking-tight text-white">
             Desktop Canvas
           </span>
-        </div>
+        </button>
 
         <div className="h-4 w-[1px] bg-[#27272a]" />
 

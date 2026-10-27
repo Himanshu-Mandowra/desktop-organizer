@@ -45,7 +45,7 @@ const BOA_DEFAULT_WALLPAPER = {
 
 const MAX_WALLPAPER_BYTES = 20 * 1024 * 1024; // 20MB limit
 
-function CanvasBoard() {
+function CanvasBoard({ onGoHome }) {
   const stageRef = useRef(null);
   const bgLayerRef = useRef(null);
   const centerWorkspaceRef = useRef(null);
@@ -1364,6 +1364,7 @@ function CanvasBoard() {
       {/* 1. FIXED TOP NAVBAR (Hidden in Full Preview Mode) */}
       {!isFullPreview && (
         <TopNavbar
+          onGoHome={onGoHome}
           isLeftOpen={isLeftOpen}
           setIsLeftOpen={setIsLeftOpen}
           isRightOpen={isRightOpen}

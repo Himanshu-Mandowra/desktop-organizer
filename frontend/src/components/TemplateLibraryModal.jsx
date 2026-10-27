@@ -3,7 +3,6 @@ import X from "lucide-react/dist/esm/icons/x";
 import Heart from "lucide-react/dist/esm/icons/heart";
 import Upload from "lucide-react/dist/esm/icons/upload";
 import Video from "lucide-react/dist/esm/icons/video";
-import Sparkles from "lucide-react/dist/esm/icons/sparkles";
 import Check from "lucide-react/dist/esm/icons/check";
 
 const MAX_BYTES = 20 * 1024 * 1024; // 20MB
@@ -96,7 +95,11 @@ function TemplateLibraryModal({
         {/* HEADER */}
         <div className="flex items-center justify-between border-b border-[#27272a] px-6 py-4">
           <div className="flex items-center gap-2.5">
-            <Sparkles size={20} className="text-indigo-400" />
+            <img
+              src="/logo.png"
+              alt="Desktop Canvas Logo"
+              className="h-9 w-9 object-contain"
+            />
             <div>
               <h2 className="text-base font-bold">Wallpaper & Live Template Library</h2>
               <p className="text-xs text-zinc-400">

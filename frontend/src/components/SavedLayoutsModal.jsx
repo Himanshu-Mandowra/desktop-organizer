@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import X from "lucide-react/dist/esm/icons/x";
 import Save from "lucide-react/dist/esm/icons/save";
-import Folder from "lucide-react/dist/esm/icons/folder";
 import Trash2 from "lucide-react/dist/esm/icons/trash-2";
 import { LAYOUTS_ARE_LOCAL } from "../services/api";
 
@@ -71,7 +70,11 @@ function SavedLayoutsModal({
       <div className="flex max-h-[82vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[#27272a] bg-[#121215] text-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-[#27272a] px-6 py-4">
           <div className="flex items-center gap-2.5">
-            <Folder size={18} className="text-indigo-400" />
+            <img
+              src="/logo.png"
+              alt="Desktop Canvas Logo"
+              className="h-9 w-9 object-contain"
+            />
             <h2 className="text-base font-bold">
               {LAYOUTS_ARE_LOCAL
                 ? "Saved Layouts (This Browser)"

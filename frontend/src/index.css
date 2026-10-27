@@ -26,3 +26,55 @@ code {
   width: 0;
   height: 0;
 }
+
+/* Landing page hover float + lift animation (crisp subpixel-free text & borders) */
+@keyframes landingFloat {
+  0%, 100% {
+    transform: translateY(-4px);
+  }
+  50% {
+    transform: translateY(-9px);
+  }
+}
+
+.hover-float {
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.25s ease, box-shadow 0.28s ease;
+}
+
+.hover-float:hover {
+  transform: translateY(-5px);
+  animation: landingFloat 2.2s ease-in-out infinite;
+  box-shadow: 0 14px 28px -8px rgba(0, 0, 0, 0.75);
+}
+
+/* Smooth left-to-right light-shade fill effect on button hover */
+.btn-fill-lr {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background-color: #4f46e5;
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s ease;
+  backface-visibility: hidden;
+}
+
+.btn-fill-lr::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: #818cf8; /* Light indigo shade */
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: -1;
+}
+
+.btn-fill-lr:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px -6px rgba(99, 102, 241, 0.45);
+}
+
+.btn-fill-lr:hover::before {
+  transform: scaleX(1);
+}

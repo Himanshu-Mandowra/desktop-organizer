@@ -1,6 +1,5 @@
 import { useState } from "react";
 import X from "lucide-react/dist/esm/icons/x";
-import User from "lucide-react/dist/esm/icons/user";
 
 function AuthModal({ isOpen, onClose, promptMessage, onAuthSuccess, authApi }) {
   const [mode, setMode] = useState("signup");
@@ -39,9 +38,11 @@ function AuthModal({ isOpen, onClose, promptMessage, onAuthSuccess, authApi }) {
       <div className="w-full max-w-md overflow-hidden rounded-2xl border border-[#27272a] bg-[#121215] p-6 text-white shadow-2xl">
         <div className="flex items-center justify-between pb-4 border-b border-[#27272a]">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#18181b] border border-[#27272a] text-indigo-400">
-              <User size={18} />
-            </div>
+            <img
+              src="/logo.png"
+              alt="Desktop Canvas Logo"
+              className="h-9 w-9 object-contain"
+            />
             <div>
               <h2 className="text-base font-bold">
                 {mode === "signup" ? "Create Free Account" : "Welcome Back"}
