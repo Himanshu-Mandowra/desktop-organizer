@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import X from "lucide-react/dist/esm/icons/x";
 import Save from "lucide-react/dist/esm/icons/save";
 import Folder from "lucide-react/dist/esm/icons/folder";
@@ -18,7 +18,7 @@ function SavedLayoutsModal({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  const fetchLayouts = async () => {
+  const fetchLayouts = useCallback(async () => {
     try {
       setLoading(true);
       const data = await layoutApi.getAll();
@@ -28,14 +28,14 @@ function SavedLayoutsModal({
     } finally {
       setLoading(false);
     }
-  };
+  }, [layoutApi]);
 
   useEffect(() => {
     if (isOpen) {
       setMessage("");
       fetchLayouts();
     }
-  }, [isOpen]);
+  }, [isOpen, fetchLayouts]);
 
   if (!isOpen) return null;
 
@@ -73,7 +73,9 @@ function SavedLayoutsModal({
           <div className="flex items-center gap-2.5">
             <Folder size={18} className="text-indigo-400" />
             <h2 className="text-base font-bold">
-              {LAYOUTS_ARE_LOCAL ? "Saved Layouts (This Browser)" : "Saved Cloud Layouts"}
+              {LAYOUTS_ARE_LOCAL
+                ? "Saved Layouts (This Browser)"
+                : "Saved Cloud Layouts"}
             </h2>
           </div>
           <button
