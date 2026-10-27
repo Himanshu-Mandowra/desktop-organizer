@@ -1,3 +1,4 @@
+import { useState } from "react";
 import Square from "lucide-react/dist/esm/icons/square";
 import Circle from "lucide-react/dist/esm/icons/circle";
 import Triangle from "lucide-react/dist/esm/icons/triangle";
@@ -8,6 +9,14 @@ import LayoutGrid from "lucide-react/dist/esm/icons/layout-grid";
 import Plus from "lucide-react/dist/esm/icons/plus";
 import RotateCw from "lucide-react/dist/esm/icons/rotate-cw";
 import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw";
+import Layers from "lucide-react/dist/esm/icons/layers";
+import GroupIcon from "lucide-react/dist/esm/icons/group";
+import UngroupIcon from "lucide-react/dist/esm/icons/ungroup";
+import ArrowUp from "lucide-react/dist/esm/icons/arrow-up";
+import ArrowDown from "lucide-react/dist/esm/icons/arrow-down";
+import ChevronsUp from "lucide-react/dist/esm/icons/chevrons-up";
+import ChevronsDown from "lucide-react/dist/esm/icons/chevrons-down";
+import GripVertical from "lucide-react/dist/esm/icons/grip-vertical";
 import {
   calculateAppsFit,
   getBoxSizeForAppGrid,
@@ -30,27 +39,230 @@ const TITLE_STYLES = [
 function EditorPanel({
   isOpen,
   selectedSection,
-  sections,
-  setSelectedId,
+  selectedIds = [],
+  sections = [],
+  onSelectSection,
+  setSelectedIds,
   addSection,
   updateSection,
+  updateSelectedSections,
   deleteSection,
+  deleteSelectedSections,
+  groupSelected,
+  ungroupSelected,
+  onBringToFront,
+  onSendToBack,
+  onBringForward,
+  onSendBackward,
+  onReorderLayer,
   gridConfig,
   stageSize,
   onImageFileForSection,
 }) {
+  const [draggedLayerId, setDraggedLayerId] = useState(null);
+  const [dragOverLayerId, setDragOverLayerId] = useState(null);
+
   if (!isOpen) return null;
 
-  if (!selectedSection) {
+  const isMultiSelected = selectedIds.length > 1;
+  const selectedSet = new Set(selectedIds);
+  const selectedObjects = sections.filter((s) => selectedSet.has(s.id));
+  const hasGroupedSelection = selectedObjects.some((s) => Boolean(s.groupId));
+  const uniqueGroups = new Set(
+    selectedObjects.map((s) => s.groupId).filter(Boolean)
+  );
+  const isSingleGroupSelected =
+    hasGroupedSelection &&
+    uniqueGroups.size === 1 &&
+    selectedObjects.every((s) => Boolean(s.groupId));
+
+  // Reusable Layer Order + Draggable Layer Stack Panel
+  const renderLayersManager = () => (
+    <div className="rounded-lg border border-[#27272a] bg-[#18181b] p-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-zinc-300">
+          <Layers size={13} className="text-indigo-400" />
+          <span>Layers ({sections.length})</span>
+        </div>
+        {sections.length > 0 && (
+          <button
+            onClick={() =>
+              selectedIds.length === sections.length
+                ? setSelectedIds([])
+                : setSelectedIds(sections.map((s) => s.id))
+            }
+            className="text-[10px] font-semibold text-indigo-400 hover:text-indigo-300"
+          >
+            {selectedIds.length === sections.length
+              ? "Deselect All"
+              : "Select All (Ctrl+A)"}
+          </button>
+        )}
+      </div>
+
+      {/* LAYER ORDERING ACTION BUTTONS */}
+      <div className="grid grid-cols-4 gap-1">
+        <button
+          disabled={selectedIds.length === 0}
+          onClick={() => onBringToFront()}
+          title="Bring to Front (Ctrl+Shift+])"
+          className="flex flex-col items-center justify-center gap-0.5 rounded-md border border-[#27272a] bg-[#121215] py-1.5 text-[10px] font-semibold text-zinc-300 transition hover:border-zinc-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          <ChevronsUp size={13} />
+          <span>To Front</span>
+        </button>
+        <button
+          disabled={selectedIds.length === 0}
+          onClick={() => onBringForward()}
+          title="Bring Forward (Ctrl+])"
+          className="flex flex-col items-center justify-center gap-0.5 rounded-md border border-[#27272a] bg-[#121215] py-1.5 text-[10px] font-semibold text-zinc-300 transition hover:border-zinc-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          <ArrowUp size={13} />
+          <span>Forward</span>
+        </button>
+        <button
+          disabled={selectedIds.length === 0}
+          onClick={() => onSendBackward()}
+          title="Send Backward (Ctrl+[)"
+          className="flex flex-col items-center justify-center gap-0.5 rounded-md border border-[#27272a] bg-[#121215] py-1.5 text-[10px] font-semibold text-zinc-300 transition hover:border-zinc-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          <ArrowDown size={13} />
+          <span>Backward</span>
+        </button>
+        <button
+          disabled={selectedIds.length === 0}
+          onClick={() => onSendToBack()}
+          title="Send to Back (Ctrl+Shift+[)"
+          className="flex flex-col items-center justify-center gap-0.5 rounded-md border border-[#27272a] bg-[#121215] py-1.5 text-[10px] font-semibold text-zinc-300 transition hover:border-zinc-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          <ChevronsDown size={13} />
+          <span>To Back</span>
+        </button>
+      </div>
+
+      {/* GROUP / UNGROUP BUTTONS */}
+      {(selectedIds.length >= 2 || hasGroupedSelection) && (
+        <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+          <button
+            disabled={selectedIds.length < 2 || isSingleGroupSelected}
+            onClick={groupSelected}
+            title="Group Selected Boxes (Ctrl+G)"
+            className="flex items-center justify-center gap-1.5 rounded-md border border-indigo-500/60 bg-indigo-600/20 py-1.5 text-[11px] font-bold text-indigo-200 transition hover:bg-indigo-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <GroupIcon size={13} />
+            <span>Group (Ctrl+G)</span>
+          </button>
+          <button
+            disabled={!hasGroupedSelection}
+            onClick={ungroupSelected}
+            title="Ungroup Selected Boxes (Ctrl+Shift+G)"
+            className="flex items-center justify-center gap-1.5 rounded-md border border-[#27272a] bg-[#121215] py-1.5 text-[11px] font-bold text-zinc-300 transition hover:border-zinc-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <UngroupIcon size={13} />
+            <span>Ungroup</span>
+          </button>
+        </div>
+      )}
+
+      {/* DRAGGABLE LAYER LIST (Top of list = Front-most layer) */}
+      {sections.length > 0 ? (
+        <div className="space-y-1 max-h-52 overflow-y-auto pr-0.5">
+          {[...sections].reverse().map((sec, revIdx) => {
+            const actualIndex = sections.length - 1 - revIdx;
+            const isSel = selectedSet.has(sec.id);
+            const fit = calculateAppsFit(sec, gridConfig, stageSize);
+            const isDragOver = dragOverLayerId === sec.id;
+
+            return (
+              <div
+                key={sec.id}
+                draggable
+                onDragStart={(e) => {
+                  setDraggedLayerId(sec.id);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (draggedLayerId && draggedLayerId !== sec.id) {
+                    setDragOverLayerId(sec.id);
+                  }
+                }}
+                onDragLeave={() => {
+                  if (dragOverLayerId === sec.id) {
+                    setDragOverLayerId(null);
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (draggedLayerId && draggedLayerId !== sec.id) {
+                    onReorderLayer(draggedLayerId, sec.id);
+                  }
+                  setDraggedLayerId(null);
+                  setDragOverLayerId(null);
+                }}
+                onDragEnd={() => {
+                  setDraggedLayerId(null);
+                  setDragOverLayerId(null);
+                }}
+                onClick={(e) => onSelectSection(sec.id, e.shiftKey)}
+                className={`flex items-center justify-between rounded-md border px-2 py-1.5 cursor-pointer transition ${
+                  isDragOver
+                    ? "border-emerald-500 bg-[#27272a]"
+                    : isSel
+                    ? "border-indigo-500 bg-[#27272a] text-white"
+                    : "border-[#27272a] bg-[#121215] text-zinc-300 hover:border-zinc-600"
+                }`}
+              >
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <GripVertical
+                    size={12}
+                    className="shrink-0 cursor-grab text-zinc-500"
+                  />
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                    style={{ backgroundColor: sec.color }}
+                  />
+                  <span className="truncate font-semibold text-[11px]">
+                    {sec.title || "Untitled"}
+                  </span>
+                  {sec.groupId && (
+                    <span className="rounded bg-purple-950 border border-purple-700 px-1 py-0.2 text-[9px] font-bold text-purple-300">
+                      GRP
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] text-zinc-400">
+                    {fit.cols}×{fit.rows}
+                  </span>
+                  <span className="rounded bg-[#18181b] border border-[#27272a] px-1 text-[9px] font-mono text-zinc-400">
+                    #{actualIndex + 1}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="text-[11px] text-zinc-500 text-center py-2">
+          No section boxes on canvas yet.
+        </div>
+      )}
+    </div>
+  );
+
+  // 1. EMPTY SELECTION VIEW
+  if (selectedIds.length === 0) {
     return (
-      <aside className="w-[320px] shrink-0 h-full bg-[#121215] border-l border-[#27272a] flex flex-col overflow-y-auto p-4 text-xs text-white select-none">
-        <div className="mb-3 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-          Box Editor
+      <aside className="w-[320px] shrink-0 h-full bg-[#121215] border-l border-[#27272a] flex flex-col overflow-y-auto p-4 text-xs text-white select-none space-y-4">
+        <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+          Box & Layer Editor
         </div>
 
         <div className="rounded-lg border border-[#27272a] bg-[#18181b] p-4 text-center space-y-3">
           <p className="text-xs text-zinc-400">
-            Click any section box on the preview canvas to edit its attached top title bar, opacity, shape, rotation, or image fill.
+            Click a box, <span className="text-zinc-200 font-semibold">Shift+Click</span> multiple boxes, or drag a selection rectangle on the empty canvas to group or reorder layers.
           </p>
           <button
             onClick={() => addSection()}
@@ -61,38 +273,154 @@ function EditorPanel({
           </button>
         </div>
 
-        {sections.length > 0 && (
-          <div className="mt-6 space-y-2">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-              All Boxes on Canvas ({sections.length})
+        {renderLayersManager()}
+      </aside>
+    );
+  }
+
+  // 2. MULTI-SELECTION / GROUP VIEW (2+ boxes selected)
+  if (isMultiSelected || !selectedSection) {
+    const primaryBox = selectedObjects[0] || {};
+    const batchColor = primaryBox.color || "#00ffff";
+    const batchTitleBgOpacity =
+      primaryBox.titleBgOpacity !== undefined
+        ? Number(primaryBox.titleBgOpacity)
+        : 0.45;
+    const batchBoxOpacity =
+      primaryBox.boxOpacity !== undefined
+        ? Number(primaryBox.boxOpacity)
+        : 0.65;
+
+    return (
+      <aside className="w-[320px] shrink-0 h-full bg-[#121215] border-l border-[#27272a] flex flex-col overflow-y-auto text-xs text-white select-none">
+        {/* HEADER */}
+        <div className="flex items-center justify-between border-b border-[#27272a] px-4 py-3">
+          <div>
+            <h2 className="text-sm font-bold text-white">
+              {isSingleGroupSelected
+                ? `Group (${selectedIds.length} Boxes)`
+                : `${selectedIds.length} Boxes Selected`}
+            </h2>
+            <p className="text-[11px] text-zinc-400">
+              Move together with mouse or arrow keys
+            </p>
+          </div>
+
+          <button
+            onClick={deleteSelectedSections}
+            title="Delete Selected Boxes (Delete)"
+            className="flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-red-500"
+          >
+            <Trash2 size={13} />
+            <span>Delete ({selectedIds.length})</span>
+          </button>
+        </div>
+
+        <div className="p-4 space-y-5">
+          {/* GROUP / UNGROUP CARD */}
+          <div className="rounded-lg border border-[#27272a] bg-[#18181b] p-3 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                Selection Grouping
+              </span>
+              <span className="text-[10px] font-semibold text-indigo-400">
+                {isSingleGroupSelected ? "Grouped Unit" : "Multi-Selection"}
+              </span>
             </div>
-            <div className="space-y-1.5">
-              {sections.map((sec) => {
-                const fit = calculateAppsFit(sec, gridConfig, stageSize);
-                return (
-                  <button
-                    key={sec.id}
-                    onClick={() => setSelectedId(sec.id)}
-                    className="flex w-full items-center justify-between rounded-lg border border-[#27272a] bg-[#18181b] px-3 py-2 text-left transition hover:border-zinc-500"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="h-3 w-3 rounded-sm"
-                        style={{ backgroundColor: sec.color }}
-                      />
-                      <span className="font-semibold text-zinc-200">
-                        {sec.title}
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-zinc-400">
-                      {fit.cols}×{fit.rows} folders
-                    </span>
-                  </button>
-                );
-              })}
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                disabled={isSingleGroupSelected}
+                onClick={groupSelected}
+                className="flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <GroupIcon size={14} />
+                <span>Group (Ctrl+G)</span>
+              </button>
+              <button
+                disabled={!hasGroupedSelection}
+                onClick={ungroupSelected}
+                className="flex items-center justify-center gap-1.5 rounded-lg border border-[#27272a] bg-[#121215] px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-[#27272a] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <UngroupIcon size={14} />
+                <span>Ungroup</span>
+              </button>
             </div>
           </div>
-        )}
+
+          {/* BATCH APPEARANCE CONTROLS FOR ALL SELECTED BOXES */}
+          <div className="rounded-lg border border-[#27272a] bg-[#18181b] p-3 space-y-3">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+              Batch Style ({selectedIds.length} Boxes)
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-zinc-300 font-semibold">
+                Border & Title Bar Color
+              </span>
+              <input
+                type="color"
+                value={batchColor}
+                onChange={(e) =>
+                  updateSelectedSections(
+                    { color: e.target.value },
+                    { key: "batch-color" }
+                  )
+                }
+                className="h-8 w-16 cursor-pointer rounded-lg border border-[#27272a] bg-[#121215] p-1"
+              />
+            </div>
+
+            <div>
+              <div className="mb-1 flex justify-between text-[11px]">
+                <span className="text-zinc-400">Title Bar BG Opacity</span>
+                <span className="font-bold text-white">
+                  {Math.round(batchTitleBgOpacity * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={batchTitleBgOpacity}
+                onChange={(e) =>
+                  updateSelectedSections(
+                    { titleBgOpacity: Number(e.target.value) },
+                    { key: "batch-title-opacity" }
+                  )
+                }
+                className="w-full accent-indigo-600"
+              />
+            </div>
+
+            <div>
+              <div className="mb-1 flex justify-between text-[11px]">
+                <span className="text-zinc-400">Box Interior Opacity</span>
+                <span className="font-bold text-white">
+                  {Math.round(batchBoxOpacity * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={batchBoxOpacity}
+                onChange={(e) =>
+                  updateSelectedSections(
+                    { boxOpacity: Number(e.target.value) },
+                    { key: "batch-box-opacity" }
+                  )
+                }
+                className="w-full accent-indigo-600"
+              />
+            </div>
+          </div>
+
+          {/* LAYER ORDER & DRAGGABLE LAYER STACK */}
+          {renderLayersManager()}
+        </div>
       </aside>
     );
   }
@@ -647,6 +975,9 @@ function EditorPanel({
             />
           </div>
         </div>
+
+        {/* 6. LAYER ORDER & DRAGGABLE LAYER STACK */}
+        {renderLayersManager()}
       </div>
     </aside>
   );

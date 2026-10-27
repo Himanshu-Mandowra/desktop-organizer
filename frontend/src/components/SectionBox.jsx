@@ -30,17 +30,22 @@ const RESIZE_HANDLES = [
 function SectionBox({
   section,
   isSelected,
+  isSingleSelected,
   isDropTarget,
   gridConfig,
   stageSize,
   scale,
-  setSelectedId,
+  onSelect,
+  onMultiDragStart,
+  onMultiDragMove,
+  onMultiDragEnd,
   deleteSection,
   updateSection,
 }) {
   const [loadedImage, setLoadedImage] = useState(null);
   const groupRef = useRef(null);
   const resizeStartRef = useRef(null);
+  const dragStartLogicalRef = useRef(null);
 
   useEffect(() => {
     if (!section.imageUrl) {
@@ -222,12 +227,16 @@ function SectionBox({
         }
       }
 
-      updateSection(section.id, {
-        x: Math.round(nextX),
-        y: Math.round(nextY),
-        width: Math.round(nextW),
-        height: Math.round(nextH),
-      });
+      updateSection(
+        section.id,
+        {
+          x: Math.round(nextX),
+          y: Math.round(nextY),
+          width: Math.round(nextW),
+          height: Math.round(nextH),
+        },
+        { key: `resize-${section.id}`, window: 800 }
+      );
     };
 
     const onWindowMouseUp = () => {
@@ -268,9 +277,13 @@ function SectionBox({
         });
       }
 
-      updateSection(section.id, {
-        rotation: Math.round(angleDeg) % 360,
-      });
+      updateSection(
+        section.id,
+        {
+          rotation: Math.round(angleDeg) % 360,
+        },
+        { key: `rotate-${section.id}`, window: 800 }
+      );
     };
 
     const onWindowMouseUp = () => {
@@ -324,11 +337,32 @@ function SectionBox({
       }}
       onClick={(e) => {
         e.cancelBubble = true;
-        setSelectedId(section.id);
+        onSelect(section.id, Boolean(e.evt?.shiftKey));
       }}
       onTap={(e) => {
         e.cancelBubble = true;
-        setSelectedId(section.id);
+        onSelect(section.id, false);
+      }}
+      onDragStart={(e) => {
+        if (e.target === groupRef.current) {
+          dragStartLogicalRef.current = { x: section.x, y: section.y };
+          if (onMultiDragStart) {
+            onMultiDragStart(section.id);
+          }
+        }
+      }}
+      onDragMove={(e) => {
+        if (e.target === groupRef.current && dragStartLogicalRef.current) {
+          const newLeft = e.target.x() - w / 2;
+          const newTop = e.target.y() - h / 2;
+          const snappedLeft = snapColX(newLeft);
+          const snappedTop = snapRowTop(newTop);
+          const dx = snappedLeft - dragStartLogicalRef.current.x;
+          const dy = snappedTop - dragStartLogicalRef.current.y;
+          if (onMultiDragMove) {
+            onMultiDragMove(section.id, dx, dy);
+          }
+        }
       }}
       onDragEnd={(e) => {
         if (e.target === groupRef.current) {
@@ -337,21 +371,16 @@ function SectionBox({
           const snappedLeft = snapColX(newLeft);
           const snappedTop = snapRowTop(newTop);
 
-          if (isPcGrid) {
-            const newRowIndex = Math.max(
-              0,
-              Math.round((snappedTop + rowTopOffset) / cellH)
-            );
-            updateSection(section.id, {
-              x: snappedLeft,
-              y: getRowTopY(newRowIndex, metrics),
-              height: getRowSpanHeight(newRowIndex, appFit.rows, metrics),
-            });
-          } else {
-            updateSection(section.id, {
-              x: snappedLeft,
-              y: snappedTop,
-            });
+          const startPos = dragStartLogicalRef.current || {
+            x: section.x,
+            y: section.y,
+          };
+          const dx = snappedLeft - startPos.x;
+          const dy = snappedTop - startPos.y;
+          dragStartLogicalRef.current = null;
+
+          if (onMultiDragEnd) {
+            onMultiDragEnd(section.id, dx, dy);
           }
         }
       }}
@@ -502,6 +531,51 @@ function SectionBox({
         </Group>
       )}
 
+      {/* MULTI-SELECT / GROUP SELECTION HIGHLIGHT OUTLINE (Hidden during export) */}
+      {isSelected && (
+        <Rect
+          name="ui-helper"
+          x={-4}
+          y={titleStyle === "inside-bar" || titleStyle === "hidden" ? -4 : -headerH - 4}
+          width={w + 8}
+          height={
+            (titleStyle === "inside-bar" || titleStyle === "hidden" ? h : h + headerH) + 8
+          }
+          stroke={section.groupId ? "#a855f7" : "#6366f1"}
+          strokeWidth={1.5}
+          dash={[6, 4]}
+          cornerRadius={6}
+          listening={false}
+        />
+      )}
+
+      {/* GROUP BADGE WHEN PART OF A PERMANENT GROUP */}
+      {section.groupId && (
+        <Group
+          name="ui-helper"
+          x={8}
+          y={titleStyle === "inside-bar" ? 3 : -headerH + 3}
+          listening={false}
+        >
+          <Rect
+            width={36}
+            height={18}
+            fill="#18181b"
+            stroke="#a855f7"
+            strokeWidth={1}
+            cornerRadius={4}
+          />
+          <Text
+            text="GRP"
+            x={6}
+            y={4}
+            fontSize={9}
+            fill="#d8b4fe"
+            fontStyle="bold"
+          />
+        </Group>
+      )}
+
       {/* DELETE BUTTON ON BOX */}
       <Group
         name="delete-btn"
@@ -537,8 +611,8 @@ function SectionBox({
         />
       </Group>
 
-      {/* ROTATION HANDLE (Shown when box is selected) */}
-      {isSelected && (
+      {/* ROTATION HANDLE (Shown when single box is selected) */}
+      {(isSingleSelected ?? isSelected) && (
         <Group name="resize-handle">
           <Line
             points={[w / 2, -headerH, w / 2, -headerH - 22]}

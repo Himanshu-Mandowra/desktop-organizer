@@ -14,6 +14,14 @@ import AuthModal from "./AuthModal";
 import SavedLayoutsModal from "./SavedLayoutsModal";
 
 import { saveDesignState, loadDesignState } from "../utils/storage";
+import useHistory from "../utils/useHistory";
+import {
+  bringToFront,
+  sendToBack,
+  bringForward,
+  sendBackward,
+  moveLayerTo,
+} from "../utils/layers";
 import {
   getDesktopGridMetrics,
   getRowTopY,
@@ -55,15 +63,77 @@ function CanvasBoard() {
   const [isFullPreview, setIsFullPreview] = useState(false);
 
   // Target Screen Resolution (Full 1:1 Logical Coordinates)
-  const [stageSize, setStageSize] = useState({
-    width: typeof window !== "undefined" ? window.screen.width : 1920,
-    height: typeof window !== "undefined" ? window.screen.height : 1080,
+  // stageSize, gridConfig, wallpaper and sections live in ONE history document so
+  // Ctrl+Z / Ctrl+Shift+Z undo and redo every kind of edit.
+  const {
+    doc,
+    set: setDoc,
+    undo,
+    redo,
+    reset: resetDoc,
+    canUndo,
+    canRedo,
+  } = useHistory({
+    stageSize: {
+      width: typeof window !== "undefined" ? window.screen.width : 1920,
+      height: typeof window !== "undefined" ? window.screen.height : 1080,
+    },
+    // Grid Configuration: "pc" (Exact 75×87 Windows Desktop Folder Grid) or "custom"
+    gridConfig: {
+      showGrid: true,
+      mode: "pc",
+      customGridSize: 20,
+      pcCellWidth: 75,
+      pcCellHeight: 87,
+    },
+    activeWallpaper: BOA_DEFAULT_WALLPAPER,
+    sections: [],
   });
+
+  const { stageSize, gridConfig, activeWallpaper, sections } = doc;
+
+  const applyUpdate = (current, updater) =>
+    typeof updater === "function" ? updater(current) : updater;
+
+  const setStageSize = useCallback(
+    (u, opts) =>
+      setDoc((d) => ({ ...d, stageSize: applyUpdate(d.stageSize, u) }), {
+        key: "stage",
+        ...opts,
+      }),
+    [setDoc]
+  );
+  const setGridConfig = useCallback(
+    (u, opts) =>
+      setDoc((d) => ({ ...d, gridConfig: applyUpdate(d.gridConfig, u) }), {
+        key: "grid",
+        ...opts,
+      }),
+    [setDoc]
+  );
+  const setActiveWallpaper = useCallback(
+    (u, opts) =>
+      setDoc(
+        (d) => ({ ...d, activeWallpaper: applyUpdate(d.activeWallpaper, u) }),
+        opts
+      ),
+    [setDoc]
+  );
+  const setSections = useCallback(
+    (u, opts) =>
+      setDoc((d) => ({ ...d, sections: applyUpdate(d.sections, u) }), opts),
+    [setDoc]
+  );
 
   const [sizeInputs, setSizeInputs] = useState({
     width: typeof window !== "undefined" ? window.screen.width : 1920,
     height: typeof window !== "undefined" ? window.screen.height : 1080,
   });
+
+  // Keep the W/H inputs in sync after undo / redo of a screen size change
+  useEffect(() => {
+    setSizeInputs({ width: stageSize.width, height: stageSize.height });
+  }, [stageSize.width, stageSize.height]);
 
   // Measured Center Workspace Bounds to Scale Preview Canvas Proportionally (No Scroll)
   const [workspaceBounds, setWorkspaceBounds] = useState({
@@ -71,22 +141,15 @@ function CanvasBoard() {
     height: 540,
   });
 
-  // Grid Configuration: "pc" (Exact 75×87 Windows Desktop Folder Grid) or "custom"
-  const [gridConfig, setGridConfig] = useState({
-    showGrid: true,
-    mode: "pc",
-    customGridSize: 20,
-    pcCellWidth: 75,
-    pcCellHeight: 87,
-  });
-
-  // Active Wallpaper Metadata + Loaded Media Element
-  const [activeWallpaper, setActiveWallpaper] = useState(BOA_DEFAULT_WALLPAPER);
+  // Active Wallpaper Loaded Media Element
   const [bgMediaElement, setBgMediaElement] = useState(null);
 
-  // Sections State
-  const [sections, setSections] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
+  // Selection (supports multi-select + groups). Section order in `sections` = layer order.
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [marquee, setMarquee] = useState(null);
+  const marqueeRef = useRef(null);
+  const dragRef = useRef(null);
+  const gestureSeq = useRef(0);
   const [dropTargetId, setDropTargetId] = useState(null);
 
   // Templates & Auth Modals
@@ -107,6 +170,7 @@ function CanvasBoard() {
 
   const WIDTH = stageSize.width;
   const HEIGHT = stageSize.height;
+  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
   const selectedSection = sections.find((s) => s.id === selectedId);
   const metrics = getDesktopGridMetrics(stageSize, gridConfig);
   const {
@@ -120,6 +184,134 @@ function CanvasBoard() {
     rowGapTrim,
     scaleY,
   } = metrics;
+
+  // Keep selectedIds valid if Undo/Redo removes any selected box
+  useEffect(() => {
+    const validSet = new Set(sections.map((s) => s.id));
+    setSelectedIds((prev) => {
+      const filtered = prev.filter((id) => validSet.has(id));
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [sections]);
+
+  // Expand any selection ID list to include all members of the same groupId
+  const expandWithGroupMembers = useCallback((ids, secList) => {
+    const idSet = new Set(ids);
+    const groupIds = new Set();
+    secList.forEach((s) => {
+      if (idSet.has(s.id) && s.groupId) {
+        groupIds.add(s.groupId);
+      }
+    });
+    if (groupIds.size === 0) return Array.from(idSet);
+    secList.forEach((s) => {
+      if (s.groupId && groupIds.has(s.groupId)) {
+        idSet.add(s.id);
+      }
+    });
+    return Array.from(idSet);
+  }, []);
+
+  // Select a box (or toggle in multi-selection when Shift+Click is used)
+  const handleSelectSection = useCallback(
+    (id, shiftKey = false) => {
+      if (!id) {
+        setSelectedIds([]);
+        return;
+      }
+      const targetSec = sections.find((s) => s.id === id);
+      const unitIds = targetSec?.groupId
+        ? sections
+            .filter((s) => s.groupId === targetSec.groupId)
+            .map((s) => s.id)
+        : [id];
+
+      setSelectedIds((prev) => {
+        if (shiftKey) {
+          const allSelected = unitIds.every((uid) => prev.includes(uid));
+          if (allSelected) {
+            return prev.filter((pid) => !unitIds.includes(pid));
+          }
+          return Array.from(new Set([...prev, ...unitIds]));
+        }
+        return unitIds;
+      });
+      if (!isFullPreview) setIsRightOpen(true);
+    },
+    [sections, isFullPreview]
+  );
+
+  // Group / Ungroup actions (Ctrl+G / Ctrl+Shift+G + Sidebar buttons)
+  const groupSelected = useCallback(() => {
+    if (selectedIds.length < 2) return;
+    const newGroupId = `grp-${Date.now()}`;
+    const selSet = new Set(selectedIds);
+    setSections((prev) =>
+      prev.map((s) => (selSet.has(s.id) ? { ...s, groupId: newGroupId } : s))
+    );
+  }, [selectedIds, setSections]);
+
+  const ungroupSelected = useCallback(() => {
+    if (selectedIds.length === 0) return;
+    const selSet = new Set(selectedIds);
+    const targetGroups = new Set(
+      sections
+        .filter((s) => selSet.has(s.id) && s.groupId)
+        .map((s) => s.groupId)
+    );
+    if (targetGroups.size === 0) return;
+    setSections((prev) =>
+      prev.map((s) =>
+        selSet.has(s.id) || (s.groupId && targetGroups.has(s.groupId))
+          ? { ...s, groupId: null }
+          : s
+      )
+    );
+  }, [selectedIds, sections, setSections]);
+
+  // Layer Ordering Actions (Buttons + Drag List + Keyboard Shortcuts)
+  const handleBringToFront = useCallback(
+    (targetIds = selectedIds) => {
+      if (!targetIds.length) return;
+      const expanded = expandWithGroupMembers(targetIds, sections);
+      setSections((prev) => bringToFront(prev, expanded));
+    },
+    [selectedIds, sections, expandWithGroupMembers, setSections]
+  );
+
+  const handleSendToBack = useCallback(
+    (targetIds = selectedIds) => {
+      if (!targetIds.length) return;
+      const expanded = expandWithGroupMembers(targetIds, sections);
+      setSections((prev) => sendToBack(prev, expanded));
+    },
+    [selectedIds, sections, expandWithGroupMembers, setSections]
+  );
+
+  const handleBringForward = useCallback(
+    (targetIds = selectedIds) => {
+      if (!targetIds.length) return;
+      const expanded = expandWithGroupMembers(targetIds, sections);
+      setSections((prev) => bringForward(prev, expanded));
+    },
+    [selectedIds, sections, expandWithGroupMembers, setSections]
+  );
+
+  const handleSendBackward = useCallback(
+    (targetIds = selectedIds) => {
+      if (!targetIds.length) return;
+      const expanded = expandWithGroupMembers(targetIds, sections);
+      setSections((prev) => sendBackward(prev, expanded));
+    },
+    [selectedIds, sections, expandWithGroupMembers, setSections]
+  );
+
+  const handleReorderLayer = useCallback(
+    (dragId, targetId) => {
+      setSections((prev) => moveLayerTo(prev, dragId, targetId));
+    },
+    [setSections]
+  );
 
   // Measure Center Workspace Available Area (ResizeObserver)
   useEffect(() => {
@@ -158,25 +350,93 @@ function CanvasBoard() {
   const previewHeight = Math.round(HEIGHT * scale);
 
   // Keyboard Controls:
-  // - Delete / Backspace: Delete selected section box
-  // - ArrowUp / ArrowDown / ArrowLeft / ArrowRight: Move selected section box by 1 full folder slot
-  // - Escape: Exit Full Preview mode
+  // - Ctrl+Z: Undo
+  // - Ctrl+Shift+Z / Ctrl+Y: Redo
+  // - Ctrl+A: Select all section boxes
+  // - Ctrl+G / Ctrl+Shift+G: Group / Ungroup selected boxes
+  // - Ctrl+] / Ctrl+[: Bring Forward / Send Backward (with Shift: To Front / To Back)
+  // - Delete / Backspace: Delete all selected section boxes
+  // - ArrowUp / ArrowDown / ArrowLeft / ArrowRight: Move all selected/grouped boxes together
+  // - Escape: Exit Full Preview mode or clear multi-selection
   useEffect(() => {
     const handleKeyDown = (e) => {
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") return;
 
-      if (e.key === "Escape" && isFullPreview) {
-        setIsFullPreview(false);
+      const isMod = e.ctrlKey || e.metaKey;
+      const keyLower = e.key.toLowerCase();
+
+      // Undo / Redo
+      if (isMod && keyLower === "z") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+        return;
+      }
+      if (isMod && keyLower === "y") {
+        e.preventDefault();
+        redo();
         return;
       }
 
-      if (!selectedId) return;
+      // Select All (Ctrl+A)
+      if (isMod && keyLower === "a") {
+        e.preventDefault();
+        setSelectedIds(sections.map((s) => s.id));
+        if (!isFullPreview && sections.length > 0) setIsRightOpen(true);
+        return;
+      }
+
+      // Group / Ungroup (Ctrl+G / Ctrl+Shift+G)
+      if (isMod && keyLower === "g") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          ungroupSelected();
+        } else {
+          groupSelected();
+        }
+        return;
+      }
+
+      // Layer Ordering Shortcuts (Ctrl+] / Ctrl+[)
+      if (isMod && (e.key === "]" || e.key === "}" || e.code === "BracketRight")) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleBringToFront();
+        } else {
+          handleBringForward();
+        }
+        return;
+      }
+      if (isMod && (e.key === "[" || e.key === "{" || e.code === "BracketLeft")) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleSendToBack();
+        } else {
+          handleSendBackward();
+        }
+        return;
+      }
+
+      if (e.key === "Escape") {
+        if (isFullPreview) {
+          setIsFullPreview(false);
+        } else if (selectedIds.length > 0) {
+          setSelectedIds([]);
+        }
+        return;
+      }
+
+      if (selectedIds.length === 0) return;
+      const activeSet = new Set(expandWithGroupMembers(selectedIds, sections));
 
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
-        setSections((prev) => prev.filter((s) => s.id !== selectedId));
-        setSelectedId(null);
+        setSections((prev) => prev.filter((s) => !activeSet.has(s.id)));
+        setSelectedIds([]);
         return;
       }
 
@@ -189,54 +449,59 @@ function CanvasBoard() {
         e.preventDefault();
         const isPcMode = gridConfig.showGrid && gridConfig.mode === "pc";
 
-        setSections((prev) =>
-          prev.map((s) => {
-            if (s.id !== selectedId) return s;
+        setSections(
+          (prev) =>
+            prev.map((s) => {
+              if (!activeSet.has(s.id)) return s;
 
-            if (isPcMode) {
-              const curCol = Math.round((s.x || 0) / cellW);
-              const curRow = Math.round(((s.y || 0) + rowTopOffset) / cellH);
-              const spanCols = Math.max(1, Math.round((s.width || cellW) / cellW));
-              const spanRows = Math.max(
-                1,
-                Math.round(((s.height || cellH) + rowGapTrim) / cellH)
-              );
+              if (isPcMode) {
+                const curCol = Math.round((s.x || 0) / cellW);
+                const curRow = Math.round(((s.y || 0) + rowTopOffset) / cellH);
+                const spanCols = Math.max(
+                  1,
+                  Math.round((s.width || cellW) / cellW)
+                );
+                const spanRows = Math.max(
+                  1,
+                  Math.round(((s.height || cellH) + rowGapTrim) / cellH)
+                );
 
-              let nextCol = curCol;
-              let nextRow = curRow;
-              if (e.key === "ArrowLeft") nextCol -= 1;
-              if (e.key === "ArrowRight") nextCol += 1;
-              if (e.key === "ArrowUp") nextRow -= 1;
-              if (e.key === "ArrowDown") nextRow += 1;
+                let nextCol = curCol;
+                let nextRow = curRow;
+                if (e.key === "ArrowLeft") nextCol -= 1;
+                if (e.key === "ArrowRight") nextCol += 1;
+                if (e.key === "ArrowUp") nextRow -= 1;
+                if (e.key === "ArrowDown") nextRow += 1;
 
-              nextCol = Math.max(0, Math.min(desktopCols - spanCols, nextCol));
-              nextRow = Math.max(0, Math.min(desktopRows - spanRows, nextRow));
+                nextCol = Math.max(0, Math.min(desktopCols - spanCols, nextCol));
+                nextRow = Math.max(0, Math.min(desktopRows - spanRows, nextRow));
+
+                return {
+                  ...s,
+                  x: Math.round(nextCol * cellW),
+                  y: getRowTopY(nextRow, metrics),
+                  width: Math.round(spanCols * cellW),
+                  height: getRowSpanHeight(nextRow, spanRows, metrics),
+                };
+              }
+
+              const step = e.shiftKey
+                ? 1
+                : Math.max(5, Number(gridConfig.customGridSize) || 20);
+              let nextX = s.x;
+              let nextY = s.y;
+              if (e.key === "ArrowLeft") nextX -= step;
+              if (e.key === "ArrowRight") nextX += step;
+              if (e.key === "ArrowUp") nextY -= step;
+              if (e.key === "ArrowDown") nextY += step;
 
               return {
                 ...s,
-                x: Math.round(nextCol * cellW),
-                y: getRowTopY(nextRow, metrics),
-                width: Math.round(spanCols * cellW),
-                height: getRowSpanHeight(nextRow, spanRows, metrics),
+                x: Math.max(0, Math.min(WIDTH - s.width, Math.round(nextX))),
+                y: Math.max(0, Math.min(HEIGHT - s.height, Math.round(nextY))),
               };
-            }
-
-            const step = e.shiftKey
-              ? 1
-              : Math.max(5, Number(gridConfig.customGridSize) || 20);
-            let nextX = s.x;
-            let nextY = s.y;
-            if (e.key === "ArrowLeft") nextX -= step;
-            if (e.key === "ArrowRight") nextX += step;
-            if (e.key === "ArrowUp") nextY -= step;
-            if (e.key === "ArrowDown") nextY += step;
-
-            return {
-              ...s,
-              x: Math.max(0, Math.min(WIDTH - s.width, Math.round(nextX))),
-              y: Math.max(0, Math.min(HEIGHT - s.height, Math.round(nextY))),
-            };
-          })
+            }),
+          { key: "arrow-move", window: 600 }
         );
       }
     };
@@ -244,7 +509,8 @@ function CanvasBoard() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
-    selectedId,
+    selectedIds,
+    sections,
     isFullPreview,
     gridConfig,
     metrics,
@@ -256,20 +522,32 @@ function CanvasBoard() {
     desktopRows,
     WIDTH,
     HEIGHT,
+    undo,
+    redo,
+    groupSelected,
+    ungroupSelected,
+    handleBringToFront,
+    handleSendToBack,
+    handleBringForward,
+    handleSendBackward,
+    expandWithGroupMembers,
+    setSections,
   ]);
 
   // Snap all boxes onto exact folder borders whenever PC App Grid is active & grid metrics change
   useEffect(() => {
     if (!isHydrated) return;
     if (gridConfig.showGrid && gridConfig.mode === "pc") {
-      setSections((prev) =>
-        prev.map((s) => ({
-          ...s,
-          ...snapBoxToFolderGrid(s, gridConfig, stageSize),
-        }))
+      setSections(
+        (prev) =>
+          prev.map((s) => ({
+            ...s,
+            ...snapBoxToFolderGrid(s, gridConfig, stageSize),
+          })),
+        { replace: true }
       );
     }
-  }, [isHydrated, gridConfig, stageSize]);
+  }, [isHydrated, gridConfig, stageSize, setSections]);
 
   // 1. Load Templates & Verify User Session on Mount
   useEffect(() => {
@@ -298,54 +576,74 @@ function CanvasBoard() {
     let mounted = true;
     loadDesignState().then((saved) => {
       if (!mounted) return;
+      const defaultStage = {
+        width: typeof window !== "undefined" ? window.screen.width : 1920,
+        height: typeof window !== "undefined" ? window.screen.height : 1080,
+      };
+      const defaultGrid = {
+        showGrid: true,
+        mode: "pc",
+        customGridSize: 20,
+        pcCellWidth: 75,
+        pcCellHeight: 87,
+      };
+
       if (saved) {
-        if (saved.stageSize?.width && saved.stageSize?.height) {
-          setStageSize(saved.stageSize);
-          setSizeInputs(saved.stageSize);
-        }
-        if (saved.gridConfig) {
-          // Migrate old 76x100 default to exact Windows 75x87 folder pitch
-          const cw =
-            saved.gridConfig.pcCellWidth === 76
-              ? 75
-              : saved.gridConfig.pcCellWidth || 75;
-          const ch =
-            saved.gridConfig.pcCellHeight === 100
-              ? 87
-              : saved.gridConfig.pcCellHeight || 87;
-          setGridConfig((prev) => ({
-            ...prev,
-            ...saved.gridConfig,
-            pcCellWidth: cw,
-            pcCellHeight: ch,
-          }));
-        }
-        if (Array.isArray(saved.sections)) {
-          setSections(saved.sections);
-        }
-        if (saved.wallpaper?.url) {
-          const migratedWallpaper =
-            saved.wallpaper.title === "Luffy"
-              ? {
-                  ...saved.wallpaper,
-                  title: "Toji Fushiguro",
-                  url: "/templates/toji.jpg",
-                  templateId: "builtin-toji",
-                }
-              : saved.wallpaper;
-          setActiveWallpaper(migratedWallpaper);
-        } else {
-          setActiveWallpaper(BOA_DEFAULT_WALLPAPER);
-        }
+        const nextStageSize =
+          saved.stageSize?.width && saved.stageSize?.height
+            ? saved.stageSize
+            : defaultStage;
+        setSizeInputs(nextStageSize);
+
+        const cw =
+          saved.gridConfig?.pcCellWidth === 76
+            ? 75
+            : saved.gridConfig?.pcCellWidth || 75;
+        const ch =
+          saved.gridConfig?.pcCellHeight === 100
+            ? 87
+            : saved.gridConfig?.pcCellHeight || 87;
+        const nextGridConfig = saved.gridConfig
+          ? {
+              ...defaultGrid,
+              ...saved.gridConfig,
+              pcCellWidth: cw,
+              pcCellHeight: ch,
+            }
+          : defaultGrid;
+
+        const nextSections = Array.isArray(saved.sections) ? saved.sections : [];
+        const nextWallpaper = saved.wallpaper?.url
+          ? saved.wallpaper.title === "Luffy"
+            ? {
+                ...saved.wallpaper,
+                title: "Toji Fushiguro",
+                url: "/templates/toji.jpg",
+                templateId: "builtin-toji",
+              }
+            : saved.wallpaper
+          : BOA_DEFAULT_WALLPAPER;
+
+        resetDoc({
+          stageSize: nextStageSize,
+          gridConfig: nextGridConfig,
+          activeWallpaper: nextWallpaper,
+          sections: nextSections,
+        });
       } else {
-        setActiveWallpaper(BOA_DEFAULT_WALLPAPER);
+        resetDoc({
+          stageSize: defaultStage,
+          gridConfig: defaultGrid,
+          activeWallpaper: BOA_DEFAULT_WALLPAPER,
+          sections: [],
+        });
       }
       setIsHydrated(true);
     });
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [resetDoc]);
 
   // 3. Load Active Wallpaper (Static Image OR Live Video Wallpaper)
   useEffect(() => {
@@ -688,21 +986,223 @@ function CanvasBoard() {
         : newSection;
 
     setSections((prev) => [...prev, snapped]);
-    setSelectedId(snapped.id);
+    setSelectedIds([snapped.id]);
     if (!isFullPreview) setIsRightOpen(true);
   };
 
-  const updateSection = (id, patch) => {
-    setSections((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, ...patch } : s))
+  const updateSection = (id, patch, opts = {}) => {
+    setSections(
+      (prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+      { key: opts.key || `edit-${id}`, window: opts.window || 600, ...opts }
+    );
+  };
+
+  // Batch update multiple selected sections (e.g., color, opacity, shape)
+  const updateSelectedSections = (patch, opts = {}) => {
+    const activeSet = new Set(expandWithGroupMembers(selectedIds, sections));
+    if (activeSet.size === 0) return;
+    setSections(
+      (prev) => prev.map((s) => (activeSet.has(s.id) ? { ...s, ...patch } : s)),
+      { key: opts.key || "batch-edit", window: opts.window || 600, ...opts }
     );
   };
 
   const deleteSection = (id) => {
     setSections((prev) => prev.filter((s) => s.id !== id));
-    if (selectedId === id) {
-      setSelectedId(null);
+    setSelectedIds((prev) => prev.filter((sid) => sid !== id));
+  };
+
+  const deleteSelectedSections = () => {
+    const activeSet = new Set(expandWithGroupMembers(selectedIds, sections));
+    if (activeSet.size === 0) return;
+    setSections((prev) => prev.filter((s) => !activeSet.has(s.id)));
+    setSelectedIds([]);
+  };
+
+  // Synchronized Multi-Box / Group Mouse Dragging
+  const handleMultiDragStart = (draggedId) => {
+    const draggedSec = sections.find((s) => s.id === draggedId);
+    const isAlreadyInSelection = selectedIds.includes(draggedId);
+    let movingIds;
+    if (isAlreadyInSelection) {
+      movingIds = expandWithGroupMembers(selectedIds, sections);
+    } else {
+      movingIds = draggedSec?.groupId
+        ? sections
+            .filter((s) => s.groupId === draggedSec.groupId)
+            .map((s) => s.id)
+        : [draggedId];
+      setSelectedIds(movingIds);
     }
+
+    const startPositions = {};
+    sections.forEach((s) => {
+      if (movingIds.includes(s.id)) {
+        startPositions[s.id] = {
+          x: s.x,
+          y: s.y,
+          width: s.width,
+          height: s.height,
+        };
+      }
+    });
+
+    gestureSeq.current += 1;
+    dragRef.current = {
+      draggedId,
+      movingIds: new Set(movingIds),
+      startPositions,
+      historyKey: `multi-drag-${gestureSeq.current}`,
+    };
+  };
+
+  const applyMultiDragDelta = (dx, dy) => {
+    if (!dragRef.current) return;
+    const { movingIds, startPositions, historyKey } = dragRef.current;
+    const isPcMode = gridConfig.showGrid && gridConfig.mode === "pc";
+
+    setSections(
+      (prev) =>
+        prev.map((s) => {
+          if (!movingIds.has(s.id) || !startPositions[s.id]) return s;
+          const orig = startPositions[s.id];
+          const rawX = Math.max(0, Math.min(WIDTH - orig.width, orig.x + dx));
+          const rawY = Math.max(0, Math.min(HEIGHT - orig.height, orig.y + dy));
+
+          if (isPcMode) {
+            const col = Math.max(
+              0,
+              Math.min(
+                desktopCols - Math.max(1, Math.round(orig.width / cellW)),
+                Math.round(rawX / cellW)
+              )
+            );
+            const spanRows = Math.max(
+              1,
+              Math.round((orig.height + rowGapTrim) / cellH)
+            );
+            const row = Math.max(
+              0,
+              Math.min(
+                desktopRows - spanRows,
+                Math.round((rawY + rowTopOffset) / cellH)
+              )
+            );
+            return {
+              ...s,
+              x: Math.round(col * cellW),
+              y: getRowTopY(row, metrics),
+              height: getRowSpanHeight(row, spanRows, metrics),
+            };
+          }
+
+          if (gridConfig.showGrid) {
+            const step = Math.max(5, Number(gridConfig.customGridSize) || 20);
+            return {
+              ...s,
+              x: Math.round(rawX / step) * step,
+              y: Math.round(rawY / step) * step,
+            };
+          }
+
+          return {
+            ...s,
+            x: Math.round(rawX),
+            y: Math.round(rawY),
+          };
+        }),
+      { key: historyKey, window: 5000 }
+    );
+  };
+
+  const handleMultiDragMove = (_draggedId, dx, dy) => {
+    if (!dragRef.current || dragRef.current.movingIds.size <= 1) return;
+    applyMultiDragDelta(dx, dy);
+  };
+
+  const handleMultiDragEnd = (_draggedId, dx, dy) => {
+    applyMultiDragDelta(dx, dy);
+    dragRef.current = null;
+  };
+
+  // Marquee Selection Rectangle on Empty Canvas Background
+  const handleStageMouseDown = (e) => {
+    const stage = e.target.getStage();
+    if (e.target !== stage) return;
+
+    const pointer = stage.getPointerPosition();
+    if (!pointer) return;
+    const startX = pointer.x / scale;
+    const startY = pointer.y / scale;
+    const shiftHeld = Boolean(e.evt?.shiftKey);
+
+    marqueeRef.current = {
+      startX,
+      startY,
+      curX: startX,
+      curY: startY,
+      shiftHeld,
+      initialSelected: shiftHeld ? [...selectedIds] : [],
+    };
+    setMarquee({ x: startX, y: startY, width: 0, height: 0 });
+
+    if (!shiftHeld) {
+      setSelectedIds([]);
+    }
+
+    const onWindowMouseMove = (moveEvt) => {
+      if (!marqueeRef.current || !stage) return;
+      const stageRect = stage.container().getBoundingClientRect();
+      const curX = Math.max(
+        0,
+        Math.min(WIDTH, (moveEvt.clientX - stageRect.left) / scale)
+      );
+      const curY = Math.max(
+        0,
+        Math.min(HEIGHT, (moveEvt.clientY - stageRect.top) / scale)
+      );
+
+      marqueeRef.current.curX = curX;
+      marqueeRef.current.curY = curY;
+
+      const x = Math.min(marqueeRef.current.startX, curX);
+      const y = Math.min(marqueeRef.current.startY, curY);
+      const width = Math.abs(curX - marqueeRef.current.startX);
+      const height = Math.abs(curY - marqueeRef.current.startY);
+      setMarquee({ x, y, width, height });
+
+      if (width > 4 || height > 4) {
+        const hitIds = sections
+          .filter((sec) => {
+            const boxRight = sec.x + sec.width;
+            const boxBottom = sec.y + sec.height;
+            const boxTop = sec.y - 26;
+            return (
+              sec.x < x + width &&
+              boxRight > x &&
+              boxTop < y + height &&
+              boxBottom > y
+            );
+          })
+          .map((sec) => sec.id);
+
+        const combined = expandWithGroupMembers(
+          [...marqueeRef.current.initialSelected, ...hitIds],
+          sections
+        );
+        setSelectedIds(combined);
+      }
+    };
+
+    const onWindowMouseUp = () => {
+      marqueeRef.current = null;
+      setMarquee(null);
+      window.removeEventListener("mousemove", onWindowMouseMove);
+      window.removeEventListener("mouseup", onWindowMouseUp);
+    };
+
+    window.addEventListener("mousemove", onWindowMouseMove);
+    window.addEventListener("mouseup", onWindowMouseUp);
   };
 
   // Assign an Image File to a Section Shape
@@ -756,7 +1256,7 @@ function CanvasBoard() {
 
     if (target && file.type.startsWith("image/")) {
       handleImageFileForSection(target.id, file);
-      setSelectedId(target.id);
+      setSelectedIds([target.id]);
     } else if (
       file.type.startsWith("image/") ||
       file.type.startsWith("video/")
@@ -870,6 +1370,14 @@ function CanvasBoard() {
           stageSize={stageSize}
           scale={scale}
           autoSaveStatus={autoSaveStatus}
+          showGrid={gridConfig.showGrid}
+          onToggleGrid={() =>
+            setGridConfig((prev) => ({ ...prev, showGrid: !prev.showGrid }))
+          }
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={undo}
+          onRedo={redo}
           onOpenTemplates={() => setIsTemplateModalOpen(true)}
           onOpenSavedLayouts={handleOpenSavedLayouts}
           exportWallpaper={exportWallpaper}
@@ -963,11 +1471,7 @@ function CanvasBoard() {
               height={previewHeight}
               scaleX={scale}
               scaleY={scale}
-              onMouseDown={(e) => {
-                if (e.target === e.target.getStage()) {
-                  setSelectedId(null);
-                }
-              }}
+              onMouseDown={handleStageMouseDown}
             >
               {/* LAYER 1 (LOWEST Z-INDEX): WALLPAPER (Dimmed when PC App Grid is ON) */}
               <Layer ref={bgLayerRef} listening={false}>
@@ -988,23 +1492,29 @@ function CanvasBoard() {
 
               {/* LAYER 2 (MIDDLE Z-INDEX): INTERACTIVE SECTION BOXES */}
               <Layer>
-                {sections.map((section) => (
-                  <SectionBox
-                    key={section.id}
-                    section={section}
-                    isSelected={selectedId === section.id}
-                    isDropTarget={dropTargetId === section.id}
-                    gridConfig={gridConfig}
-                    stageSize={stageSize}
-                    scale={scale}
-                    setSelectedId={(id) => {
-                      setSelectedId(id);
-                      if (!isFullPreview) setIsRightOpen(true);
-                    }}
-                    deleteSection={deleteSection}
-                    updateSection={updateSection}
-                  />
-                ))}
+                {sections.map((section) => {
+                  const isBoxSelected = selectedIds.includes(section.id);
+                  return (
+                    <SectionBox
+                      key={section.id}
+                      section={section}
+                      isSelected={isBoxSelected}
+                      isSingleSelected={
+                        isBoxSelected && selectedIds.length === 1
+                      }
+                      isDropTarget={dropTargetId === section.id}
+                      gridConfig={gridConfig}
+                      stageSize={stageSize}
+                      scale={scale}
+                      onSelect={handleSelectSection}
+                      onMultiDragStart={handleMultiDragStart}
+                      onMultiDragMove={handleMultiDragMove}
+                      onMultiDragEnd={handleMultiDragEnd}
+                      deleteSection={deleteSection}
+                      updateSection={updateSection}
+                    />
+                  );
+                })}
               </Layer>
 
               {/* LAYER 3 (HIGHEST Z-INDEX, NON-BLOCKING): EXACT 75×87 WINDOWS FOLDERS SHADOW GRID & TASKBAR */}
@@ -1131,6 +1641,22 @@ function CanvasBoard() {
                   stroke="#3f3f46"
                   strokeWidth={1}
                 />
+
+                {/* MARQUEE SELECTION RECTANGLE (Hidden during export) */}
+                {marquee && (marquee.width > 2 || marquee.height > 2) && (
+                  <Rect
+                    name="ui-helper"
+                    x={marquee.x}
+                    y={marquee.y}
+                    width={marquee.width}
+                    height={marquee.height}
+                    fill="rgba(99, 102, 241, 0.14)"
+                    stroke="#6366f1"
+                    strokeWidth={Math.max(1.5, 1.5 / scale)}
+                    dash={[6, 4]}
+                    listening={false}
+                  />
+                )}
               </Layer>
             </Stage>
           </div>
@@ -1141,11 +1667,22 @@ function CanvasBoard() {
           <EditorPanel
             isOpen={isRightOpen}
             selectedSection={selectedSection}
+            selectedIds={selectedIds}
             sections={sections}
-            setSelectedId={setSelectedId}
+            onSelectSection={handleSelectSection}
+            setSelectedIds={setSelectedIds}
             addSection={addSection}
             updateSection={updateSection}
+            updateSelectedSections={updateSelectedSections}
             deleteSection={deleteSection}
+            deleteSelectedSections={deleteSelectedSections}
+            groupSelected={groupSelected}
+            ungroupSelected={ungroupSelected}
+            onBringToFront={handleBringToFront}
+            onSendToBack={handleSendToBack}
+            onBringForward={handleBringForward}
+            onSendBackward={handleSendBackward}
+            onReorderLayer={handleReorderLayer}
             gridConfig={gridConfig}
             stageSize={stageSize}
             onImageFileForSection={handleImageFileForSection}

@@ -8,6 +8,9 @@ import User from "lucide-react/dist/esm/icons/user";
 import LogOut from "lucide-react/dist/esm/icons/log-out";
 import Video from "lucide-react/dist/esm/icons/video";
 import Sparkles from "lucide-react/dist/esm/icons/sparkles";
+import Grid3X3 from "lucide-react/dist/esm/icons/grid-3x3";
+import Undo2 from "lucide-react/dist/esm/icons/undo-2";
+import Redo2 from "lucide-react/dist/esm/icons/redo-2";
 
 function TopNavbar({
   isLeftOpen,
@@ -18,6 +21,12 @@ function TopNavbar({
   stageSize,
   scale,
   autoSaveStatus,
+  showGrid,
+  onToggleGrid,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
   onOpenTemplates,
   onOpenSavedLayouts,
   exportWallpaper,
@@ -32,8 +41,8 @@ function TopNavbar({
 
   return (
     <header className="h-14 w-full shrink-0 flex items-center justify-between bg-[#121215] border-b border-[#27272a] px-4 select-none z-40">
-      {/* LEFT: SIDEBAR TOGGLE + BRAND + RESOLUTION INFO */}
-      <div className="flex items-center gap-3">
+      {/* LEFT: SIDEBAR TOGGLE + BRAND + UNDO/REDO + RESOLUTION INFO */}
+      <div className="flex items-center gap-2.5">
         <button
           onClick={() => setIsLeftOpen((v) => !v)}
           title={isLeftOpen ? "Collapse Left Sidebar" : "Expand Left Sidebar"}
@@ -46,7 +55,7 @@ function TopNavbar({
           <PanelLeft size={16} />
         </button>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <div className="h-3 w-3 rounded-sm bg-indigo-600" />
           <span className="text-sm font-bold tracking-tight text-white">
             Desktop Canvas
@@ -55,7 +64,29 @@ function TopNavbar({
 
         <div className="h-4 w-[1px] bg-[#27272a]" />
 
-        <div className="hidden md:flex items-center gap-2 text-xs">
+        {/* UNDO / REDO BUTTONS */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#27272a] bg-[#18181b] text-zinc-200 transition hover:bg-[#27272a] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <Undo2 size={15} />
+          </button>
+          <button
+            onClick={onRedo}
+            disabled={!canRedo}
+            title="Redo (Ctrl+Shift+Z)"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#27272a] bg-[#18181b] text-zinc-200 transition hover:bg-[#27272a] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <Redo2 size={15} />
+          </button>
+        </div>
+
+        <div className="h-4 w-[1px] bg-[#27272a]" />
+
+        <div className="hidden lg:flex items-center gap-2 text-xs">
           <span className="rounded-md bg-[#18181b] border border-[#27272a] px-2.5 py-1 font-mono text-zinc-300">
             {stageSize.width} × {stageSize.height}px ({Math.round(scale * 100)}% Fit)
           </span>
@@ -65,8 +96,22 @@ function TopNavbar({
         </div>
       </div>
 
-      {/* RIGHT: FULL PREVIEW, TEMPLATES, CLOUD SAVE, EXPORT, SIGN IN, RIGHT SIDEBAR TOGGLE */}
+      {/* RIGHT: GRID ON/OFF TOGGLE, FULL PREVIEW, TEMPLATES, SAVE LAYOUT, EXPORT, SIGN IN, RIGHT SIDEBAR TOGGLE */}
       <div className="flex items-center gap-2">
+        {/* NAVBAR GRID ON/OFF BUTTON */}
+        <button
+          onClick={onToggleGrid}
+          title={showGrid ? "Turn Grid Off" : "Turn Grid On"}
+          className={`flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold transition ${
+            showGrid
+              ? "bg-emerald-600 border-emerald-500 text-white hover:bg-emerald-500"
+              : "bg-[#18181b] border-[#27272a] text-zinc-400 hover:bg-[#27272a] hover:text-white"
+          }`}
+        >
+          <Grid3X3 size={14} />
+          <span>Grid: {showGrid ? "ON" : "OFF"}</span>
+        </button>
+
         <button
           onClick={onEnterFullPreview}
           title="Maximize Preview Screen (Full Viewport Edit Mode)"
