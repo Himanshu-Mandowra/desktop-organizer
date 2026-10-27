@@ -36,8 +36,13 @@ const TITLE_STYLES = [
   { id: "hidden", label: "Hidden" },
 ];
 
+const MIN_RIGHT_WIDTH = 260;
+const MAX_RIGHT_WIDTH = 440;
+
 function EditorPanel({
   isOpen,
+  width = 320,
+  onWidthChange,
   selectedSection,
   selectedIds = [],
   sections = [],
@@ -63,6 +68,37 @@ function EditorPanel({
   const [dragOverLayerId, setDragOverLayerId] = useState(null);
 
   if (!isOpen) return null;
+
+  const handleResizeMouseDown = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = width;
+
+    const onMouseMove = (moveEvt) => {
+      // Dragging left edge leftwards increases right sidebar width
+      const nextW = Math.max(
+        MIN_RIGHT_WIDTH,
+        Math.min(MAX_RIGHT_WIDTH, startW + (startX - moveEvt.clientX))
+      );
+      if (onWidthChange) onWidthChange(nextW);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  const renderResizeHandle = () => (
+    <div
+      onMouseDown={handleResizeMouseDown}
+      title="Drag to resize right sidebar"
+      className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-transparent transition hover:bg-indigo-600/70 z-20"
+    />
+  );
 
   const isMultiSelected = selectedIds.length > 1;
   const selectedSet = new Set(selectedIds);
@@ -166,7 +202,7 @@ function EditorPanel({
 
       {/* DRAGGABLE LAYER LIST (Top of list = Front-most layer) */}
       {sections.length > 0 ? (
-        <div className="space-y-1 max-h-52 overflow-y-auto pr-0.5">
+        <div className="space-y-1 max-h-52 overflow-y-auto no-scrollbar pr-0.5">
           {[...sections].reverse().map((sec, revIdx) => {
             const actualIndex = sections.length - 1 - revIdx;
             const isSel = selectedSet.has(sec.id);
@@ -255,7 +291,11 @@ function EditorPanel({
   // 1. EMPTY SELECTION VIEW
   if (selectedIds.length === 0) {
     return (
-      <aside className="w-[320px] shrink-0 h-full bg-[#121215] border-l border-[#27272a] flex flex-col overflow-y-auto p-4 text-xs text-white select-none space-y-4">
+      <aside
+        style={{ width }}
+        className="relative shrink-0 h-full bg-[#121215] border-l border-[#27272a] flex flex-col overflow-y-auto no-scrollbar p-4 text-xs text-white select-none space-y-4"
+      >
+        {renderResizeHandle()}
         <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
           Box & Layer Editor
         </div>
@@ -292,7 +332,11 @@ function EditorPanel({
         : 0.65;
 
     return (
-      <aside className="w-[320px] shrink-0 h-full bg-[#121215] border-l border-[#27272a] flex flex-col overflow-y-auto text-xs text-white select-none">
+      <aside
+        style={{ width }}
+        className="relative shrink-0 h-full bg-[#121215] border-l border-[#27272a] flex flex-col overflow-y-auto no-scrollbar text-xs text-white select-none"
+      >
+        {renderResizeHandle()}
         {/* HEADER */}
         <div className="flex items-center justify-between border-b border-[#27272a] px-4 py-3">
           <div>
@@ -306,14 +350,24 @@ function EditorPanel({
             </p>
           </div>
 
-          <button
-            onClick={deleteSelectedSections}
-            title="Delete Selected Boxes (Delete)"
-            className="flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-red-500"
-          >
-            <Trash2 size={13} />
-            <span>Delete ({selectedIds.length})</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => addSection()}
+              title="Create Section Box"
+              className="flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-indigo-500"
+            >
+              <Plus size={13} />
+              <span>Add</span>
+            </button>
+            <button
+              onClick={deleteSelectedSections}
+              title="Delete Selected Boxes (Delete)"
+              className="flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-red-500"
+            >
+              <Trash2 size={13} />
+              <span>Delete ({selectedIds.length})</span>
+            </button>
+          </div>
         </div>
 
         <div className="p-4 space-y-5">
@@ -479,7 +533,11 @@ function EditorPanel({
   };
 
   return (
-    <aside className="w-[320px] shrink-0 h-full bg-[#121215] border-l border-[#27272a] flex flex-col overflow-y-auto text-xs text-white select-none">
+    <aside
+      style={{ width }}
+      className="relative shrink-0 h-full bg-[#121215] border-l border-[#27272a] flex flex-col overflow-y-auto no-scrollbar text-xs text-white select-none"
+    >
+      {renderResizeHandle()}
       {/* HEADER */}
       <div className="flex items-center justify-between border-b border-[#27272a] px-4 py-3">
         <div>
@@ -489,14 +547,24 @@ function EditorPanel({
           </p>
         </div>
 
-        <button
-          onClick={() => deleteSection(selectedSection.id)}
-          title="Delete Box (or press Delete key)"
-          className="flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-red-500"
-        >
-          <Trash2 size={13} />
-          <span>Delete</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => addSection()}
+            title="Create New Section Box"
+            className="flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-indigo-500"
+          >
+            <Plus size={13} />
+            <span>Add Box</span>
+          </button>
+          <button
+            onClick={() => deleteSection(selectedSection.id)}
+            title="Delete Box (or press Delete key)"
+            className="flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-bold text-white transition hover:bg-red-500"
+          >
+            <Trash2 size={13} />
+            <span>Delete</span>
+          </button>
+        </div>
       </div>
 
       {/* CONTROLS BODY */}

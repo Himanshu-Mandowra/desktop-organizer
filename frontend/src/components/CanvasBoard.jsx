@@ -60,6 +60,8 @@ function CanvasBoard() {
   // Docked Sidebars & Full-Viewport Preview Mode
   const [isLeftOpen, setIsLeftOpen] = useState(true);
   const [isRightOpen, setIsRightOpen] = useState(true);
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(290);
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(320);
   const [isFullPreview, setIsFullPreview] = useState(false);
 
   // Target Screen Resolution (Full 1:1 Logical Coordinates)
@@ -1396,12 +1398,12 @@ function CanvasBoard() {
         {!isFullPreview && (
           <Toolbar
             isOpen={isLeftOpen}
+            width={leftSidebarWidth}
+            onWidthChange={setLeftSidebarWidth}
             handleWallpaperUpload={handleWallpaperUpload}
             activeWallpaper={activeWallpaper}
-            addSection={addSection}
             gridConfig={gridConfig}
             setGridConfig={setGridConfig}
-            stageSize={stageSize}
             sizeInputs={sizeInputs}
             onSizeInputChange={handleStageSizeInputChange}
             applyStageSize={applyStageSize}
@@ -1666,6 +1668,8 @@ function CanvasBoard() {
         {!isFullPreview && (
           <EditorPanel
             isOpen={isRightOpen}
+            width={rightSidebarWidth}
+            onWidthChange={setRightSidebarWidth}
             selectedSection={selectedSection}
             selectedIds={selectedIds}
             sections={sections}

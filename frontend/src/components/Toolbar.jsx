@@ -1,20 +1,22 @@
-import Plus from "lucide-react/dist/esm/icons/plus";
 import Grid3X3 from "lucide-react/dist/esm/icons/grid-3x3";
 import ImageIcon from "lucide-react/dist/esm/icons/image";
 import Monitor from "lucide-react/dist/esm/icons/monitor";
 import Check from "lucide-react/dist/esm/icons/check";
 import Sparkles from "lucide-react/dist/esm/icons/sparkles";
 import Video from "lucide-react/dist/esm/icons/video";
-import { PC_GRID_PRESETS, getBoxSizeForAppGrid } from "../utils/gridMath";
+import { PC_GRID_PRESETS } from "../utils/gridMath";
+
+const MIN_LEFT_WIDTH = 240;
+const MAX_LEFT_WIDTH = 420;
 
 function Toolbar({
   isOpen,
+  width = 300,
+  onWidthChange,
   handleWallpaperUpload,
   activeWallpaper,
-  addSection,
   gridConfig,
   setGridConfig,
-  stageSize,
   sizeInputs,
   onSizeInputChange,
   applyStageSize,
@@ -27,62 +29,35 @@ function Toolbar({
     setGridConfig((prev) => ({ ...prev, ...patch }));
   };
 
+  const handleResizeMouseDown = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = width;
+
+    const onMouseMove = (moveEvt) => {
+      const nextW = Math.max(
+        MIN_LEFT_WIDTH,
+        Math.min(MAX_LEFT_WIDTH, startW + (moveEvt.clientX - startX))
+      );
+      if (onWidthChange) onWidthChange(nextW);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
   return (
-    <aside className="w-[300px] shrink-0 h-full bg-[#121215] border-r border-[#27272a] flex flex-col overflow-y-auto text-xs text-white select-none">
+    <aside
+      style={{ width }}
+      className="relative shrink-0 h-full bg-[#121215] border-r border-[#27272a] flex flex-col overflow-y-auto no-scrollbar text-xs text-white select-none"
+    >
       <div className="p-4 space-y-6">
-        {/* 1. ADD SECTION BOXES */}
-        <div className="space-y-2.5">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-            Create Section Box
-          </div>
-
-          <button
-            onClick={() => addSection()}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-500"
-          >
-            <Plus size={16} />
-            <span>Add New Section Box</span>
-          </button>
-
-          {/* Quick Add Box by App Row Capacity */}
-          <div className="rounded-lg bg-[#18181b] border border-[#27272a] p-2.5 space-y-2">
-            <div className="text-[11px] font-semibold text-zinc-300">
-              Quick Add by Folder Fit (3 Rows):
-            </div>
-            <div className="grid grid-cols-3 gap-1.5">
-              {[2, 3, 4].map((cols) => {
-                const dims = getBoxSizeForAppGrid(
-                  cols,
-                  3,
-                  gridConfig,
-                  stageSize
-                );
-                return (
-                  <button
-                    key={cols}
-                    onClick={() =>
-                      addSection({
-                        title: `${cols}×3 Apps`,
-                        width: dims.width,
-                        height: dims.height,
-                      })
-                    }
-                    className="rounded-md bg-[#121215] border border-[#27272a] py-1.5 px-1 text-center font-semibold text-zinc-200 transition hover:border-indigo-500 hover:text-white"
-                  >
-                    <div>{cols} in row</div>
-                    <div className="text-[10px] font-normal text-zinc-500">
-                      {dims.width}×{dims.height}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        <div className="h-[1px] w-full bg-[#27272a]" />
-
-        {/* 2. WALLPAPER & TEMPLATE LIBRARY */}
+        {/* 1. WALLPAPER & TEMPLATE LIBRARY */}
         <div className="space-y-2.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
@@ -348,6 +323,13 @@ function Toolbar({
           )}
         </div>
       </div>
+
+      {/* DRAG HANDLE TO EXTEND / SHRINK LEFT SIDEBAR WIDTH (240px – 420px) */}
+      <div
+        onMouseDown={handleResizeMouseDown}
+        title="Drag to resize left sidebar"
+        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-transparent transition hover:bg-indigo-600/70"
+      />
     </aside>
   );
 }
