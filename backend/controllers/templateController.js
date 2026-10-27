@@ -3,9 +3,9 @@ const path = require("path");
 const Template = require("../modules/Template");
 const User = require("../modules/User");
 const {
-  cloudinary,
   isCloudinaryConfigured,
   uploadBufferToCloudinary,
+  destroyFromCloudinary,
 } = require("../config/cloudinary");
 
 // Built-in default templates (Boa Hancock as default + Toji Fushiguro)
@@ -251,9 +251,10 @@ const deleteTemplate = async (req, res, next) => {
     }
 
     if (template.publicId && isCloudinaryConfigured()) {
-      await cloudinary.uploader.destroy(template.publicId, {
-        resource_type: template.type === "live" ? "video" : "image",
-      });
+      await destroyFromCloudinary(
+        template.publicId,
+        template.type === "live" ? "video" : "image"
+      );
     }
 
     await template.deleteOne();

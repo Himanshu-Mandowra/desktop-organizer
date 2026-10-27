@@ -1,3 +1,9 @@
+import {
+  listLocalLayouts,
+  saveLocalLayout,
+  deleteLocalLayout,
+} from "../utils/layoutCache";
+
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || "http://localhost:5000/api";
 
@@ -86,7 +92,14 @@ export const templateApi = {
     }),
 };
 
-export const layoutApi = {
+// Layout storage mode:
+// - default ("local"): layouts are cached in the browser (IndexedDB), no login or backend needed.
+// - set REACT_APP_LAYOUT_STORAGE=cloud in frontend/.env to save layouts to the backend/MongoDB instead
+//   (this requires the user to be signed in).
+export const LAYOUTS_ARE_LOCAL =
+  (process.env.REACT_APP_LAYOUT_STORAGE || "local").toLowerCase() !== "cloud";
+
+const cloudLayoutApi = {
   getAll: () => apiRequest("/layouts"),
   save: (payload) =>
     apiRequest("/layouts", {
@@ -98,3 +111,14 @@ export const layoutApi = {
       method: "DELETE",
     }),
 };
+
+const localLayoutApi = {
+  getAll: async () => ({ layouts: await listLocalLayouts() }),
+  save: async (payload) => ({ layout: await saveLocalLayout(payload) }),
+  remove: async (id) => {
+    await deleteLocalLayout(id);
+    return { success: true };
+  },
+};
+
+export const layoutApi = LAYOUTS_ARE_LOCAL ? localLayoutApi : cloudLayoutApi;

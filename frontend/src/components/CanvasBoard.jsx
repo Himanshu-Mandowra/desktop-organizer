@@ -25,6 +25,7 @@ import {
   authApi,
   templateApi,
   layoutApi,
+  LAYOUTS_ARE_LOCAL,
 } from "../services/api";
 
 const BOA_DEFAULT_WALLPAPER = {
@@ -268,14 +269,7 @@ function CanvasBoard() {
         }))
       );
     }
-  }, [
-    isHydrated,
-    gridConfig.showGrid,
-    gridConfig.mode,
-    gridConfig.pcCellWidth,
-    gridConfig.pcCellHeight,
-    stageSize,
-  ]);
+  }, [isHydrated, gridConfig, stageSize]);
 
   // 1. Load Templates & Verify User Session on Mount
   useEffect(() => {
@@ -830,7 +824,7 @@ function CanvasBoard() {
   };
 
   const handleOpenSavedLayouts = () => {
-    if (!user) {
+    if (!LAYOUTS_ARE_LOCAL && !user) {
       requireAuth(
         "Please sign up or log in first to save your desktop layout to your account!"
       );
